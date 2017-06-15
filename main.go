@@ -9,46 +9,59 @@ import (
 	"io"
 	"io/ioutil"
 	"log"
+
 	"mime/multipart"
 	"net/http"
 	"net/url"
 	"os"
+	"os/signal"
 	"path"
 	"path/filepath"
+
+	_ "github.com/go-sql-driver/mysql"
+	"github.com/linlexing/datelogger"
+	_ "github.com/linlexing/dbx/mysql"
+	_ "github.com/mattn/go-oci8"
+	"github.com/robfig/cron"
+)
+
+var (
+	dlog *datelogger.DateLogger
+	workDir string
 )
 
 func main() {
-	cfg := &config{}
-	bys, err := ioutil.ReadFile("config.json")
+	os.Setenv("NLS_LANG", "AMERICAN_AMERICA.AL32UTF8")
+	str, err := os.Executable()
 	if err != nil {
-		log.Panic(err)
+		panic(err)
 	}
-	if err = json.Unmarshal(bys, cfg); err != nil {
-		log.Panic(err)
+	workDir = filepath.Dir(str)
+	dlog = datelogger.NewDateLog(filepath.Join(workDir, "log"))
+	lend := make(chan bool)
+	if err := readConfig(filepath.Join(workDir, "config.yaml")); err != nil {
+		panic(err)
 	}
-	if len(cfg.URL) == 0 {
-		log.Panic("url is nil")
+	//凌晨两点执行
+	if err := jobs.AddJob("0 0 2 * * *", cron.FuncJob(taskRun)); err != nil {
+		panic(err)
 	}
-	if _, err = os.Stat(cfg.Src); os.IsNotExist(err) {
-		log.Panic(cfg.Src, err)
-	}
-	if _, err = os.Stat(cfg.FinishOut); os.IsNotExist(err) {
-		log.Panic(cfg.FinishOut, err)
-	}
-	files, err := ioutil.ReadDir(cfg.Src)
-	if err != nil {
-		log.Panic(err)
-	}
-	if len(files) == 0 {
-		log.Println("emp dir")
-		return
-	}
-	if err = do(cfg.URL, filepath.Join(cfg.Src, files[0].Name()),
-		cfg.FinishOut, cfg.UserName, cfg.Password); err != nil {
-		log.Panic(err)
-	}
-	log.Println("success upload file", files[0].Name())
-
+	c := make(chan os.Signal, 1)
+	signal.Notify(c, os.Interrupt)
+	dlog.Println("start service...")
+	//马上执行一次
+	go taskRun()
+	go func() {
+		for range c {
+			dlog.Info("received ctrl+c,wait back job finished...")
+			jobRun.Lock()
+			dlog.Info("success shutdown")
+			lend <- true
+			break
+		}
+	}()
+	//blockforever
+	<-lend
 }
 func 认证(strURL, userName, password string) (string, error) {
 	u, err := url.Parse(strURL)
@@ -188,7 +201,7 @@ func 上传(strURL, strSrcFile, strFinishOut, austr string) error {
 	}
 	return nil
 }
-func do(strURL, strSrcFile, strFinishOut, userName, password string) error {
+func doUpload(strURL, strSrcFile, strFinishOut, userName, password string) error {
 	//认证
 	austr, err := 认证(strURL, userName, password)
 	if err != nil {

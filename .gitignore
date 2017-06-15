@@ -2,7 +2,11 @@
 *.o
 *.a
 *.so
-
+out
+template
+log
+debug
+*.rar
 # Folders
 _obj
 _test
