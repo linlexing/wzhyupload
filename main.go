@@ -5,6 +5,7 @@ import (
 	"crypto/md5"
 	"encoding/hex"
 	"encoding/json"
+	"flag"
 	"fmt"
 	"io"
 	"io/ioutil"
@@ -21,16 +22,39 @@ import (
 	_ "github.com/go-sql-driver/mysql"
 	"github.com/linlexing/datelogger"
 	_ "github.com/linlexing/dbx/mysql"
+	_ "github.com/linlexing/dbx/oracle"
 	_ "github.com/mattn/go-oci8"
-	"github.com/robfig/cron"
 )
 
 var (
-	dlog *datelogger.DateLogger
+	dlog    *datelogger.DateLogger
 	workDir string
 )
 
+func uploadAll() {
+	files, err := ioutil.ReadDir(filepath.Join(workDir, "out"))
+	if err != nil {
+		dlog.Error(err)
+		return
+	}
+	for _, one := range files {
+		filename := filepath.Join(workDir, "out", one.Name())
+		dlog.Println("file:", filename, "start upload...")
+		if err = doUpload(vconfig.URL, filename,
+			filepath.Join(workDir, vconfig.FinishOut), vconfig.UserName,
+			vconfig.Password); err != nil {
+			dlog.Error(err)
+			break
+		}
+		dlog.Println("file:", filename, "uploaded")
+	}
+
+}
 func main() {
+	build := flag.Bool("buildnow", false, "build immediate")
+
+	flag.Parse()
+
 	os.Setenv("NLS_LANG", "AMERICAN_AMERICA.AL32UTF8")
 	str, err := os.Executable()
 	if err != nil {
@@ -43,14 +67,23 @@ func main() {
 		panic(err)
 	}
 	//凌晨两点执行
-	if err := jobs.AddJob("0 0 2 * * *", cron.FuncJob(taskRun)); err != nil {
+	if err := jobs.AddFunc("0 0 2 * * *", taskRun); err != nil {
 		panic(err)
 	}
+	jobs.Start()
+	for _, one := range jobs.Entries() {
+		fmt.Printf("job next:%s\n", one.Next)
+	}
+
 	c := make(chan os.Signal, 1)
 	signal.Notify(c, os.Interrupt)
+
+	uploadAll()
 	dlog.Println("start service...")
-	//马上执行一次
-	go taskRun()
+	if *build {
+		//马上执行一次
+		go taskRun()
+	}
 	go func() {
 		for range c {
 			dlog.Info("received ctrl+c,wait back job finished...")
@@ -179,7 +212,7 @@ func Upload(url, file, austr string) (err error) {
 		log.Panic(err)
 	}
 	if code := rev["message"].(map[string]interface{})["code"].(string); code != "000000" {
-		err = fmt.Errorf("code:%s", code)
+		err = fmt.Errorf("code:%s,message:%s", code, rev["message"].(map[string]interface{})["info"].(string))
 	}
 	return
 }

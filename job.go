@@ -24,37 +24,31 @@ import (
 const batchNum = 500
 
 var (
-	jobs   = cron.New()
-	jobRun = &sync.Mutex{}
+	jobs    = cron.New()
+	running = false
+	jobRun  = &sync.Mutex{}
 )
 
-func init() {
-	jobs.Start()
-}
 func taskRun() {
+	if running {
+		return
+	}
+	running = true
+	defer func() {
+		running = false
+	}()
+	dlog.Println("before lock")
 	jobRun.Lock()
 	defer jobRun.Unlock()
-	dlog.Println("run at ", time.Now())
+	dlog.Println("start job")
 	err := buildDataFile()
 	if err != nil {
 		dlog.Error(err)
 		return
 	}
 	//然后开始上传
-	files, err := ioutil.ReadDir(filepath.Join(workDir, "out"))
-	if err != nil {
-		dlog.Error(err)
-		return
-	}
-	for _, one := range files {
-		filename := filepath.Join(workDir, "out", one.Name())
-		if err = doUpload(vconfig.URL, filename,
-			filepath.Join(workDir, vconfig.FinishOut), vconfig.UserName,
-			vconfig.Password); err != nil {
-			dlog.Error(err)
-		}
-		dlog.Println("file:", filename, "uploaded")
-	}
+	uploadAll()
+
 	dlog.Println("job finished")
 }
 func createNewZipFile() (*os.File, *zip.Writer, *bufio.Writer, error) {
@@ -62,8 +56,29 @@ func createNewZipFile() (*os.File, *zip.Writer, *bufio.Writer, error) {
 	if err := os.MkdirAll(outPath, os.ModePerm); err != nil {
 		return nil, nil, nil, err
 	}
-	file, err := os.Create(filepath.Join(outPath, fmt.Sprintf("gsdata_%s_%s_000001.zip",
-		time.Now().Format("20060102"), vconfig.AreaCode)))
+	//确定文件名过程为：
+	//out目录中没有同名文件
+	//upload目录中也没有同名文件
+	var fileName string
+	for i := 1; ; i++ {
+		fileName = fmt.Sprintf("gsdata_%s_%s_%06d.zip", time.Now().Format("20060102"),
+			vconfig.AreaCode, i)
+		var not1, not2 bool
+		if _, err := os.Stat(filepath.Join(workDir, vconfig.FinishOut, fileName)); os.IsNotExist(err) {
+			not1 = true
+		} else if err != nil {
+			return nil, nil, nil, err
+		}
+		if _, err := os.Stat(filepath.Join(workDir, "out", fileName)); os.IsNotExist(err) {
+			not2 = true
+		} else if err != nil {
+			return nil, nil, nil, err
+		}
+		if not1 && not2 {
+			break
+		}
+	}
+	file, err := os.Create(filepath.Join(outPath, fileName))
 	if err != nil {
 		return nil, nil, nil, err
 	}
@@ -235,9 +250,11 @@ func buildDataFile() error {
 			dateTimeFields = append(dateTimeFields, i)
 		}
 	}
+	icount := 0
 	if err := searchTable(db, tab, sttab, func(i int, rows [][]interface{}) error {
 		if len(rows) > 0 {
-			dlog.Println("rownum:", i, "write", len(rows), "rows")
+			icount += len(rows)
+			dlog.Println("rownum:", i, "write", len(rows), "rows,total:", icount)
 		}
 		for _, line := range rows {
 			//不复制，会影响回写影子表

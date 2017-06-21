@@ -6,7 +6,7 @@ VIEW `wzhyup` AS
     SELECT 
         '01' AS `rtype`,
         `a`.`NBXH` AS `uuid`,
-        `a`.`USCC` AS `社会信用代码`,
+        ifnull(nullif(`a`.`USCC`,''),'--') AS `社会信用代码`,
         (CASE
             WHEN
                 ((`a`.`INFOACTIONTYPE` = '2')
@@ -16,7 +16,7 @@ VIEW `wzhyup` AS
             ELSE '2'
         END) AS `工商业务类型`,
         SUBSTR(`a`.`USCC`, 10, 9) AS `组织机构代码`,
-        `a`.`ZCH` AS `注册号`,
+        ifnull(nullif(`a`.`ZCH`,''),'--' AS `注册号`,
         `a`.`QYMC` AS `详细名称`,
         `a`.`QYLX` AS `企业类型`,
         `c`.`单位类型` AS `单位类型`,

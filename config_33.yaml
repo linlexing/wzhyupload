@@ -1,11 +1,10 @@
 areacode: 330000
 url: http://10.33.16.95:8088/gwssi-stats
-src: src
 finishout: upload
 username: 10010001
 password: 123456
 driver: mysql
-dburl: gs33:Gs33123456@tcp(localhost:3306)/gs33
+dburl: tjj:tjj617@tcp(59.202.28.11:3306)/test
 table: wzhyup
 primarykey: uuid
 shadowtable: stwzhyup
